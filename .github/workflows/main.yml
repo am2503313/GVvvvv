@@ -19,7 +19,7 @@ jobs:
 
       # Step 3: Authenticate ngrok
       - name: Auth
-        run: .\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+        run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
         env:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
 
@@ -38,14 +38,11 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: rdp-session-data
-          path: |
-            C:\Program Files
-            C:\Users\runneradmin\Desktop
-            C:\Users\runneradmin\Documents
+          path: C:\Users\runneradmin\AppData\Local
 
       # Step 6: Start Ngrok Tunnel
       - name: Create Tunnel
-        run: .\ngrok.exe tcp 3389
+        run: .\ngrok\ngrok.exe tcp 3389
 
       # Step 7: Automatically Stop Workflow After 5h 40m & Start New One
       - name: Auto Restart Workflow
@@ -58,6 +55,7 @@ jobs:
   # New Job: Restore Everything in New Workflow
   restore:
     runs-on: windows-latest
+    needs: build
 
     steps:
       # Step 1: Restore Installed Apps & Data
@@ -65,7 +63,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: rdp-session-data
-          path: C:\
+          path: C:\Users\runneradmin\AppData\Local
 
       # Step 2: Re-Enable RDP and Ngrok
       - name: Re-Enable RDP
@@ -76,4 +74,4 @@ jobs:
       - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
 
       - name: Restart Ngrok Tunnel
-        run: .\ngrok.exe tcp 3389
+        run: .\ngrok\ngrok.exe tcp 3389
