@@ -1,64 +1,31 @@
-name: Clon
+name: Auto Restart Ngrok
 
 on:
-  push:
-  workflow_dispatch:
+  schedule:
+    - cron: "49 */5 * * *"  # Runs every 5 hours and 49 minutes
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - name: Download ngrok
-        run: Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+      - name: Download Ngrok
+        run: Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+      
+      - name: Extract Ngrok
+        run: Expand-Archive -Path "ngrok.zip" -DestinationPath .
 
-      - name: Extract ngrok
-        run: Expand-Archive -Path "ngrok.zip" -DestinationPath "ngrok"
-
-      - name: Authenticate ngrok
-        run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+      - name: Authenticate Ngrok
+        run: .\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
         env:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
 
-      - name: Enable RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+      - name: Stop Previous Ngrok Instance (if running)
+        run: taskkill /IM ngrok.exe /F || echo "No previous instance found"
 
-      # Ensure the directory exists before uploading
-      - name: Check if folder exists
-        run: |
-          if (-Not (Test-Path "C:\Users\runneradmin\AppData\Local")) {
-            New-Item -ItemType Directory -Path "C:\Users\runneradmin\AppData\Local"
-          }
+      - name: Start Ngrok Tunnel on the Same Port
+        run: .\ngrok.exe tcp 3389  # Change to your preferred port
 
-      - name: Save Installed Apps & Data
-        uses: actions/upload-artifact@v3
-        with:
-          name: rdp-session-data
-          path: C:\Users\runneradmin\AppData\Local
-
-      - name: Create Ngrok Tunnel
-        run: .\ngrok\ngrok.exe tcp 3389
-
-  restore:
-    runs-on: windows-latest
-    needs: build
-
-    steps:
-      - name: Restore Installed Apps & Data
-        uses: actions/download-artifact@v3
-        with:
-          name: rdp-session-data
-          path: C:\Users\runneradmin\AppData\Local
-
-      - name: Restart RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-
-      - name: Restart Ngrok Tunnel
-        run: .\ngrok\ngrok.exe tcp 3389
+      - name: Keep the Workflow Alive
+        run: Start-Sleep -Seconds 20940  # 5 hours 49 minutes (20940 seconds)
