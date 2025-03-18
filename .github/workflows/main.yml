@@ -37,6 +37,7 @@ jobs:
         run: |
           $ngrokUrl = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels").tunnels[0].public_url
           echo "NGROK_URL=$ngrokUrl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
+          echo "Ngrok URL: $ngrokUrl"
 
       - name: Display RDP Address
         run: echo "RDP Address: ${{ env.NGROK_URL }}"
