@@ -9,7 +9,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Download ngrok
       run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
@@ -83,7 +83,7 @@ jobs:
         $backup_list | ConvertTo-Json | Out-File "${{ github.workspace }}/state/backups.json"
 
     - name: Upload state as artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: workflow-state
         path: ${{ github.workspace }}/state
@@ -110,7 +110,7 @@ jobs:
 
     - name: Download state from previous run
       if: github.event.inputs.previousRunId != ''
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v3
       with:
         name: workflow-state
         path: ${{ github.workspace }}/state
