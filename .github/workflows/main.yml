@@ -1,45 +1,140 @@
-name: Cl
-
+name: Continuous RDP Session
 
 on: [push, workflow_dispatch]
 
-
 jobs:
-
   build:
-
-
     runs-on: windows-latest
-
+    timeout-minutes: 350  # Set to just under 6 hours (350 minutes)
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
 
-    - name: Download
-
+    - name: Download ngrok
       run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
 
-    - name: Extract
-
+    - name: Extract ngrok
       run: Expand-Archive ngrok.zip
 
-    - name: Auth
-
+    - name: Auth ngrok
       run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
-
       env:
-
         NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
 
-    - name: Enable TS
+    - name: Enable Remote Desktop
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!wywyywgw626263ehbdjddjdbgshddlld" -Force)
 
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+    - name: Create state file directory
+      run: |
+        mkdir -p ${{ github.workspace }}/state
+        echo "Creating state directory to persist data between workflow runs"
 
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    - name: Check for existing ngrok configuration
+      id: check_config
+      run: |
+        if (Test-Path "${{ github.workspace }}/state/ngrok_config.txt") {
+          echo "::set-output name=config_exists::true"
+          $config = Get-Content "${{ github.workspace }}/state/ngrok_config.txt"
+          echo "::set-output name=ngrok_url::$config"
+        } else {
+          echo "::set-output name=config_exists::false"
+        }
 
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+    - name: Start ngrok tunnel
+      id: start_tunnel
+      run: |
+        $process = Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389" -PassThru -NoNewWindow
+        Start-Sleep -Seconds 5
+        $ngrok_url = Invoke-RestMethod -Uri http://localhost:4040/api/tunnels | Select-Object -ExpandProperty tunnels | Select-Object -ExpandProperty public_url
+        echo "NGROK_URL=$ngrok_url" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo $ngrok_url > "${{ github.workspace }}/state/ngrok_config.txt"
+        echo "::set-output name=ngrok_url::$ngrok_url"
 
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!wywyywgw626263ehbdjddjdbgshddlld" -Force)
+    - name: Display connection information
+      run: |
+        echo "RDP is ready to connect!"
+        echo "Connect to: ${{ steps.start_tunnel.outputs.ngrok_url }}"
+        echo "Username: runneradmin"
+        echo "Password: P@ssw0rd!wywyywgw626263ehbdjddjdbgshddlld"
 
-    - name: Create Tunnel
+    - name: Create backup of important data
+      run: |
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $backup_dir = "${{ github.workspace }}/state/backup_$timestamp"
+        New-Item -ItemType Directory -Path $backup_dir -Force
+        # Add commands to backup important files/directories
+        # Example: Copy-Item -Path "C:\path\to\important\data" -Destination $backup_dir -Recurse
 
-      run: .\ngrok\ngrok.exe tcp 3389
+    - name: Update backup registry
+      run: |
+        $backup_list = @()
+        if (Test-Path "${{ github.workspace }}/state/backups.json") {
+          $backup_list = Get-Content "${{ github.workspace }}/state/backups.json" | ConvertFrom-Json
+        }
+        $backup_list += @{
+          "timestamp" = Get-Date -Format "yyyyMMdd_HHmmss"
+          "path" = "${{ github.workspace }}/state/backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        }
+        $backup_list | ConvertTo-Json | Out-File "${{ github.workspace }}/state/backups.json"
+
+    - name: Upload state as artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: workflow-state
+        path: ${{ github.workspace }}/state
+
+    - name: Schedule workflow restart
+      run: |
+        echo "Scheduling workflow restart before 6-hour timeout..."
+        $token = "${{ secrets.GITHUB_TOKEN }}"
+        $headers = @{
+          "Authorization" = "token $token"
+          "Accept" = "application/vnd.github.v3+json"
+        }
+        $body = @{
+          "ref" = "${{ github.ref }}"
+          "inputs" = @{
+            "previousRunId" = "${{ github.run_id }}"
+          }
+        } | ConvertTo-Json
+        
+        # Schedule the workflow to restart after 5 hours and 45 minutes (345 minutes)
+        Start-Sleep -Seconds 20700
+        
+        Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$(echo ${{ github.workflow }} | sed 's/ /%20/g')/dispatches" -Method Post -Headers $headers -Body $body -ContentType "application/json"
+
+    - name: Download state from previous run
+      if: github.event.inputs.previousRunId != ''
+      uses: actions/download-artifact@v2
+      with:
+        name: workflow-state
+        path: ${{ github.workspace }}/state
+
+    - name: Restore data from previous run
+      if: github.event.inputs.previousRunId != ''
+      run: |
+        echo "Restoring data from previous workflow run..."
+        # Add commands to restore important files/directories from backup
+        if (Test-Path "${{ github.workspace }}/state/backups.json") {
+          $backups = Get-Content "${{ github.workspace }}/state/backups.json" | ConvertFrom-Json
+          $latest_backup = $backups | Sort-Object -Property timestamp -Descending | Select-Object -First 1
+          
+          if ($latest_backup) {
+            echo "Restoring from backup: $($latest_backup.path)"
+            # Example: Copy-Item -Path "$($latest_backup.path)\*" -Destination "C:\path\to\restore\location" -Recurse
+          }
+        }
+
+    - name: Keep alive
+      run: |
+        # Keep the workflow running until close to the timeout
+        $timeout = [DateTime]::Now.AddMinutes(345)
+        while ([DateTime]::Now -lt $timeout) {
+          echo "Workflow still active. Time remaining: $(($timeout - [DateTime]::Now).TotalMinutes) minutes"
+          Start-Sleep -Seconds 300
+        }
